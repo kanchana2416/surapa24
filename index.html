@@ -1,4 +1,4 @@
-!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="th">
 <head>
 <meta charset="UTF-8">
@@ -131,6 +131,9 @@ table.status-table td{padding:10px 12px;border-bottom:1px solid var(--line);colo
 .badge.pending{background:#fff4e0;color:var(--amber);}
 .badge.approved{background:#e8f7ef;color:var(--green);}
 .badge.rejected{background:#fdeaea;color:var(--danger);}
+.badge.cancelled{background:#eef1f5;color:#64748b;}
+.btn-cancel{background:#fdeaea;border:1px solid #f5c2c2;color:var(--danger);padding:6px 10px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;}
+.btn-cancel:hover{background:#fbd5d5;}
 /* ===== Footer ===== */
 .footer{background:var(--navy-900);color:#cfd9f2;padding:16px 24px;display:flex;justify-content:center;gap:36px;flex-wrap:wrap;font-size:12.5px;}
 .footer .row{display:flex;align-items:center;gap:7px;}
@@ -334,7 +337,7 @@ table.status-table td{padding:10px 12px;border-bottom:1px solid var(--line);colo
           <div class="placeholder">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="9"/><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4"/></svg>
             <h3>ค้นหาการจองของคุณ</h3>
-            <p>กรอกอีเมลหรือเบอร์โทรศัพท์ที่ใช้ตอนจอง แล้วกด "ค้นหา"</p>
+            <p>กรอกอีเมลหรือเบอร์โทรศัพท์ที่ใช้ตอนจอง แล้วกด "ค้นหา" เพื่อดูสถานะหรือยกเลิกการจอง</p>
           </div>
         </div>
       </div>
@@ -399,7 +402,7 @@ table.status-table td{padding:10px 12px;border-bottom:1px solid var(--line);colo
    มาวางแทนที่ '' ด้านล่างนี้ เช่น
    const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycb.../exec';
    ========================================================================= */
-const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyXkyh4aUcMyOz2DbTUh61vjiK1v9Bjjb2swvM0Gtk6hd4JzAi-42YOQtPursdPo8gMYA/exec';
+const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwX_n1hifOqlJqdfGNtsn4L0_VXz8YB5ZokwN4d3GmqOMHQKKlCBDt3H5PJq6d24Gge2A/exec';
 
 let DEMO_MODE = !SCRIPT_URL;
 
@@ -525,6 +528,7 @@ function renderCalendar(){
       if(!cell.other){
         const dayStr = `${viewYear}-${monthStr}-${String(cell.d).padStart(2,'0')}`;
         const dayBookings = bookings.filter(b => {
+          if((b.Status||'').includes('ยกเลิก')) return false; // ไม่แสดงรายการที่ยกเลิกแล้ว
           const end = (b.EndDate && b.EndDate >= b.Date) ? b.EndDate : b.Date;
           return dayStr >= b.Date && dayStr <= end;
         });
@@ -789,6 +793,7 @@ document.getElementById('resetBtn').addEventListener('click', ()=>{
 /* ---------- Status search ---------- */
 function badgeFor(status){
   status = status || 'รอการอนุมัติ';
+  if(status.includes('ยกเลิก')) return `<span class="badge cancelled">🚫 ${status}</span>`;
   if(status.includes('ไม่อนุมัติ')) return `<span class="badge rejected">✕ ${status}</span>`;
   if(status.includes('อนุมัติ')) return `<span class="badge approved">✓ ${status}</span>`;
   return `<span class="badge pending">⏳ ${status}</span>`;
@@ -798,7 +803,17 @@ function fileLinkCell(b){
   if(b.FileName) return `<span style="color:var(--muted);">${b.FileName}</span>`;
   return '<span style="color:var(--muted);">—</span>';
 }
-function renderStatusTable(list){
+let lastSearchQuery = ''; // เก็บคำค้น (อีเมล/เบอร์) ไว้ใช้ยืนยันตัวตนตอนยกเลิก
+
+function canCancelBooking(b){
+  const st = b.Status || '';
+  if(st.includes('ยกเลิก') || st.includes('ไม่อนุมัติ')) return false;
+  const todayStr = new Date().toISOString().split('T')[0];
+  const end = (b.EndDate && b.EndDate >= b.Date) ? b.EndDate : b.Date;
+  return end >= todayStr; // ยกเลิกได้เฉพาะรายการที่ยังไม่ผ่านไปแล้ว
+}
+
+function renderStatusTable(list, allowCancel=false){
   const body = document.getElementById('statusBody');
   if(!list.length){
     body.innerHTML = `<div class="placeholder">
@@ -808,30 +823,79 @@ function renderStatusTable(list){
   }
   const rows = list.map(b=>{
     const room = ROOMS[b.Room] || {name:b.Room};
+    const cancelCell = allowCancel
+      ? `<td>${canCancelBooking(b) ? `<button class="btn-cancel" onclick="userCancelBooking('${b.BookingID}')">✕ ยกเลิกการจอง</button>` : '<span style="color:var(--muted);">—</span>'}</td>`
+      : '';
     return `<tr>
       <td>${room.name}</td><td>${dateRangeText(b)}</td><td>${periodLabelFromTimes(b.StartTime, b.EndTime)}</td>
-      <td>${b.FullName||''}</td><td>${fileLinkCell(b)}</td><td>${badgeFor(b.Status)}</td>
+      <td>${b.FullName||''}</td><td>${fileLinkCell(b)}</td><td>${badgeFor(b.Status)}</td>${cancelCell}
     </tr>`;
   }).join('');
+  const cancelHead = allowCancel ? '<th>จัดการ</th>' : '';
   body.innerHTML = `<table class="status-table">
-    <thead><tr><th>ห้อง</th><th>วันที่ใช้งาน</th><th>ช่วงเวลา</th><th>ผู้จอง</th><th>ไฟล์แนบ</th><th>สถานะ</th></tr></thead>
-    <tbody>${rows}</tbody></table>`;
+    <thead><tr><th>ห้อง</th><th>วันที่ใช้งาน</th><th>ช่วงเวลา</th><th>ผู้จอง</th><th>ไฟล์แนบ</th><th>สถานะ</th>${cancelHead}</tr></thead>
+    <tbody>${rows}</tbody></table>
+    ${allowCancel ? '<p class="hint-small" style="margin-top:10px;">* ยกเลิกได้เฉพาะรายการของอีเมล/เบอร์โทรศัพท์ที่ค้นหา และยังไม่ถึงวันใช้งานที่ผ่านมาแล้ว</p>' : ''}`;
 }
+
+async function apiCancel(id, contact){
+  if(DEMO_MODE){
+    const b = bookings.find(x=>x.BookingID===id);
+    if(b) b.Status = 'ยกเลิกแล้ว';
+    return {success:true};
+  }
+  const res = await fetch(SCRIPT_URL, {
+    method:'POST',
+    headers:{'Content-Type':'text/plain;charset=utf-8'},
+    body: JSON.stringify({action:'cancel', payload:{id, contact}})
+  });
+  return res.json();
+}
+
+async function userCancelBooking(id){
+  const b = bookings.find(x=>x.BookingID===id);
+  if(!b) return;
+  const room = ROOMS[b.Room] || {name:b.Room};
+  if(!confirm(`ยืนยันยกเลิกการจอง?\n\n${room.name}\nวันที่ ${dateRangeText(b)}\n${periodLabelFromTimes(b.StartTime, b.EndTime)}`)) return;
+  try{
+    const result = await apiCancel(id, lastSearchQuery);
+    if(result.success){
+      await refreshAll();
+      runStatusSearch(); // แสดงผลตารางใหม่ตามคำค้นเดิม
+      showToast('ยกเลิกการจองเรียบร้อยแล้ว');
+    }else{
+      showToast(result.message || 'ยกเลิกไม่สำเร็จ กรุณาลองใหม่', false);
+    }
+  }catch(err){
+    console.error(err);
+    showToast('เกิดข้อผิดพลาดในการเชื่อมต่อ', false);
+  }
+}
+
+function runStatusSearch(){
+  const q = lastSearchQuery;
+  if(!q) return;
+  const filtered = bookings.filter(b => (b.Email||'').toLowerCase().includes(q) || (b.Phone||'').includes(q));
+  renderStatusTable(filtered, true);
+}
+
 document.getElementById('searchBtn').addEventListener('click', ()=>{
   const q = document.getElementById('searchInput').value.trim().toLowerCase();
   if(!q){ showToast('กรุณากรอกอีเมลหรือเบอร์โทรศัพท์', false); return; }
-  const filtered = bookings.filter(b => (b.Email||'').toLowerCase().includes(q) || (b.Phone||'').includes(q));
-  renderStatusTable(filtered);
+  if(q.length < 6){ showToast('กรุณากรอกอีเมลหรือเบอร์โทรศัพท์อย่างน้อย 6 ตัวอักษร', false); return; }
+  lastSearchQuery = q;
+  runStatusSearch();
 });
 document.getElementById('searchAllBtn').addEventListener('click', ()=>{
   document.getElementById('searchInput').value = '';
-  renderStatusTable(bookings.slice().sort((a,b)=> (a.Date<b.Date?1:-1)));
+  lastSearchQuery = '';
+  renderStatusTable(bookings.slice().sort((a,b)=> (a.Date<b.Date?1:-1)), false);
 });
 
 /* ---------- Admin / approval panel ---------- */
 let adminLoggedIn = false;
 let adminPasscode = '';
-const DEMO_ADMIN_PASSCODE = 'csa2569'; // ใช้ตอนยังไม่เชื่อมต่อ Google Sheet (โหมดสาธิต)
+const DEMO_ADMIN_PASSCODE = 'demo1234'; // ใช้ตอนยังไม่เชื่อมต่อ Google Sheet (โหมดสาธิต)
 
 async function apiCheckPasscode(passcode){
   if(DEMO_MODE) return { success: passcode === DEMO_ADMIN_PASSCODE, message:'รหัสผ่านไม่ถูกต้อง' };
@@ -915,6 +979,7 @@ function renderAdminTable(){
       <td style="white-space:nowrap;">
         <button class="btn-secondary" style="padding:6px 10px;font-size:12px;color:var(--green);" onclick="adminSetStatus('${b.BookingID}','อนุมัติแล้ว')">✓ อนุมัติ</button>
         <button class="btn-secondary" style="padding:6px 10px;font-size:12px;color:var(--danger);" onclick="adminSetStatus('${b.BookingID}','ไม่อนุมัติ')">✕ ไม่อนุมัติ</button>
+        <button class="btn-secondary" style="padding:6px 10px;font-size:12px;color:#64748b;" onclick="adminSetStatus('${b.BookingID}','ยกเลิกแล้ว')">🚫 ยกเลิก</button>
       </td>
     </tr>`;
   }).join('');
@@ -924,12 +989,13 @@ function renderAdminTable(){
 }
 
 async function adminSetStatus(id, status){
+  if(status !== 'อนุมัติแล้ว' && !confirm(`ยืนยันเปลี่ยนสถานะคำขอ ${id} เป็น "${status}" ?`)) return;
   try{
     const result = await apiUpdateStatus(id, status);
     if(result.success){
       await refreshAll();
       renderAdminTable();
-      showToast(status==='อนุมัติแล้ว' ? 'อนุมัติคำขอแล้ว' : 'ปฏิเสธคำขอแล้ว');
+      showToast(status==='อนุมัติแล้ว' ? 'อนุมัติคำขอแล้ว' : status==='ยกเลิกแล้ว' ? 'ยกเลิกการจองแล้ว' : 'ปฏิเสธคำขอแล้ว');
     }else{
       showToast(result.message || 'ดำเนินการไม่สำเร็จ', false);
     }
